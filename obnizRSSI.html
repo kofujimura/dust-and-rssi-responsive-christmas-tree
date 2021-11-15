@@ -1,0 +1,111 @@
+<!-- HTML Example -->
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://obniz.com/js/jquery-3.2.1.min.js"></script>
+    <script src="https://unpkg.com/obniz/obniz.js"></script>
+    <script src="js/perlin.js"></script>
+  </head>
+  <body>
+    <div id="obniz-debug"></div>
+    <h1>Dust monitor using M5Stamp and Obniz</h1>
+    <button id="start">Start</button>
+    <button id="end">stop</button>
+    <script>
+      // Obniz connected to a Neopixel LED tape
+      const obnizLED = new Obniz("Your_Obniz_ID"); // m5atom lite
+
+      // Obniz connected to a BLE scanner
+      const obnizRSSI = new Obniz("Your_Obniz_ID"); // Obniz board
+
+      // BLE localName for the BLE scanner
+      // ex) "BBC micro:bit [tepig]"
+      const BLE_LOCAL_NAME = "BLE_local_name_of_your_device";
+
+      // Threshold for counting up the number of times by RSSI value
+      let started = true;
+      let near = false;
+      let count = 0;
+      const rssiNear = -64;
+      const rssiFar = -75;
+
+      let mode = "on"; // on: cleaining, off: dust sensor
+      const LED_size = 50;
+      const LEDs_off = [...Array(LED_size)].map(() => [0, 0, 0]);
+      const DELAY = 180;
+
+      let leds;
+      obnizLED.onconnect = async function () {
+        leds = obnizLED.wired("WS2812B", { din: 26 }); // 32 for Stamp, 26 for Atom lite
+      };
+
+      async function onLED(color) {
+        let ledList = [];
+        for (let i = 0; i < LED_size; i++) {
+          ledList.push([color, 1.0, 0.2]);
+        }
+        if (leds != undefined) {
+          leds.hsvs(ledList);
+          await obnizLED.wait(DELAY);
+        }
+      }
+      async function offLED() {
+        leds.hsvs(LEDs_off);
+        await obnizLED.wait(DELAY);
+      }
+
+      document.querySelector("#start").addEventListener("click", function () {
+        rssiSensorInit();
+      });
+
+      document.querySelector("#end").addEventListener("click", function () {
+        rssiSensorStop();
+      });
+
+      obnizRSSI.onconnect = async function () {
+        await obnizRSSI.ble.initWait();
+      };
+
+      async function rssiSensorInit() {
+        console.log("started");
+
+        let target = {
+          localName: BLE_LOCAL_NAME
+        };
+        //var target = {};
+
+        let setting = {
+          duration: null, // 60 sec or null
+          duplicate: true // allow duplicate
+        };
+
+        obnizRSSI.ble.scan.onfind = async function (peripheral) {
+          //console.log(peripheral.rssi);
+
+          if (peripheral.rssi > rssiNear && !near) {
+            console.log("true");
+            near = true;
+            onLED((count % 5) * 72);
+            count++;
+          }
+
+          if (peripheral.rssi < rssiFar && near) {
+            near = false;
+            //offLED();
+          }
+          obnizRSSI.display.clear();
+          obnizRSSI.display.print(peripheral.localName);
+          obnizRSSI.display.print("RSSI: " + peripheral.rssi);
+          obnizRSSI.display.print("Count: " + count);
+        };
+
+        await obnizRSSI.ble.scan.startWait(target, setting);
+      }
+
+      async function rssiSensorStop() {
+        console.log("stopped");
+        await obnizRSSI.ble.scan.endWait();
+      }
+    </script>
+  </body>
+</html>

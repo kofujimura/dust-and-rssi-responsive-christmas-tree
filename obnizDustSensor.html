@@ -1,0 +1,138 @@
+<!-- HTML Example -->
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://obniz.com/js/jquery-3.2.1.min.js"></script>
+    <script src="https://unpkg.com/obniz/obniz.js"></script>
+    <script src="js/perlin.js"></script>
+  </head>
+  <body>
+    <div id="obniz-debug"></div>
+    <h1>Dust monitor using Obniz and NeoPixel</h1>
+    <canvas id="cnvs"></canvas>
+    <button id="btn1">stop</button>
+    <script>
+      // Obniz connected to a Neopixel LED tape
+      const obnizLED = new Obniz("Your_Obniz_ID"); // m5atom lite
+
+      // Obniz connected to a Globe dust sensor
+      const obniz = new Obniz("Your_Obniz_ID"); // Obniz board
+
+      let COLOR_POSITION = 0; // color must be from 0 to 359.
+      const COLOR_SCALE = 120; // from -90 to 90
+      const column_size = 16;
+      const LED_size = 50;
+      const LEDs_off = [...Array(LED_size)].map(() => [0, 0, 0]);
+      const DELAY = 180;
+
+      let cnvs = document.getElementById("cnvs");
+      cnvs.width = window.innerWidth;
+      cnvs.height = (cnvs.width * LED_size) / column_size;
+      let ctx = cnvs.getContext("2d");
+
+      let box_size = cnvs.width / column_size;
+      let grid = 4;
+
+      let leds;
+      obnizLED.onconnect = async function () {
+        clear();
+        leds = obnizLED.wired("WS2812B", { din: 26 }); // 32 for Stamp, 26 for Atom lite
+      };
+
+      async function onLED(color) {
+        for (let column = 0; column < column_size; column++) {
+          let ledList = [];
+          for (let j = 0; j < LED_size; j++) {
+            let v =
+              color +
+              parseInt(
+                perlin.get(
+                  (column * grid) / column_size,
+                  (j * grid) / column_size
+                ) * COLOR_SCALE
+              );
+            if (v > 359 || v < 0) v = 0;
+            ledList.push([v, 1.0, 0.2]);
+            display(column, j, v);
+            //if (column == 0) console.log(ledList);
+          }
+          if (leds != undefined) {
+            leds.hsvs(ledList);
+            await obnizLED.wait(DELAY);
+          }
+        }
+        offLED();
+        clear();
+        perlin.seed();
+      }
+
+      async function offLED() {
+        leds.hsvs(LEDs_off);
+        await obnizLED.wait(DELAY);
+      }
+
+      function display(i, j, v) {
+        ctx.fillStyle = "hsl(" + v + ",100%,50%)";
+        ctx.fillRect(i * box_size, j * box_size, box_size, box_size);
+      }
+
+      function clear() {
+        ctx.fillStyle = "#FFF";
+        ctx.fillRect(0, 0, box_size * column_size, box_size * LED_size);
+      }
+
+      let lowpulseoccupancy = 0;
+      let mode = "on";
+
+      function startloop() {
+        obniz.onloop = async function () {
+          if (mode === "on") {
+            obniz.measure.echo({
+              io_pulse: 6, // io for generate pulse (dummy)
+              io_echo: 3, // io to be measured
+              pulse: "positive", // generate pulse pattern (dummy)
+              pulse_width: 0.1, // generate pulse width (dummy)
+              measure_edges: 2, // 1 to 4. maximum edges to measure
+              timeout: 1000, // this is optional. 1000(1sec) is default
+              callback: function (edges) {
+                //console.log(edges.length);
+                if (
+                  edges.length === 2 &&
+                  edges[0].edge === false &&
+                  edges[1].edge === true
+                ) {
+                  lowpulseoccupancy = Math.floor(
+                    edges[1].timing - edges[0].timing
+                  );
+                  onLED(COLOR_POSITION + lowpulseoccupancy);
+                  obniz.display.clear();
+                  obniz.display.print(lowpulseoccupancy);
+                  offLED();
+                }
+              }
+            });
+          }
+        };
+      }
+
+      obniz.onconnect = async function () {
+        obniz.display.clear();
+        obniz.display.print("Connected");
+        obniz.io0.output(false);
+        obniz.io1.output(true);
+        obniz.switch.onchange = function (state) {
+          if (state === "left") mode = "on";
+          if (state === "right") mode = "off";
+          if (state === "left" || state === "right") {
+            obniz.display.clear();
+            obniz.display.print(mode);
+          }
+        };
+
+        startloop();
+        //obniz.resetOnDisconnect(false);
+        //obniz.close();
+      };
+    </script>
+  </body>
+</html>
